@@ -23,6 +23,8 @@ WILDCARD_DOMAIN=$2
 DB_USER="system_user"
 DB_PASS="system_password"
 REDIS_PASS="redispw"
+POSTGRES_TAG="latest"
+REDIS_TAG="7-el9"
 
 # --- Namespace Logic ---
 echo "--- 1. Preparing Namespace: $NAMESPACE ---"
@@ -80,22 +82,27 @@ echo "Operator is up! Provisioning database infrastructure..."
 echo "--- 4. Deploying Persistent Databases (PostgreSQL & Redis) ---"
 
 # System Database
-oc create deployment system-db-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:7-el9
+oc create deployment system-db-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:${POSTGRES_TAG}
 oc set env deployment/system-db-manual POSTGRESQL_USER=$DB_USER POSTGRESQL_PASSWORD=$DB_PASS POSTGRESQL_DATABASE=system_db
 oc set volume deployment/system-db-manual --add --name=system-db-data --type=pvc --claim-size=5Gi --mount-path=/var/lib/pgsql/data
 oc expose deployment system-db-manual --port=5432
 
 # Zync Database
-oc create deployment zync-db-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:latest
+oc create deployment zync-db-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:${POSTGRES_TAG}
 oc set env deployment/zync-db-manual POSTGRESQL_USER=$DB_USER POSTGRESQL_PASSWORD=$DB_PASS POSTGRESQL_DATABASE=zync_db
 oc set volume deployment/zync-db-manual --add --name=zync-db-data --type=pvc --claim-size=1Gi --mount-path=/var/lib/pgsql/data
 oc expose deployment zync-db-manual --port=5432
 
 # Redis
-oc create deployment redis-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/redis:latest
+oc create deployment redis-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/redis:${REDIS_TAG}
 oc set env deployment/redis-manual REDIS_PASSWORD=$REDIS_PASS
 oc set volume deployment/redis-manual --add --name=redis-data --type=pvc --claim-size=1Gi --mount-path=/var/lib/redis/data
 oc expose deployment redis-manual --port=6379
+
+echo "--- Waiting for Database Pods to be Ready ---"
+oc wait --for=condition=Ready pod -l app=redis-manual --timeout=120s
+oc wait --for=condition=Ready pod -l app=system-db-manual --timeout=120s
+oc wait --for=condition=Ready pod -l app=zync-db-manual --timeout=120s
 
 echo "--- 5. Creating Secrets for 3scale ---"
 
