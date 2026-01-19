@@ -9,6 +9,7 @@ DB_PASS="system_password"
 REDIS_PASS="redispw"
 POSTGRES_TAG="latest"
 REDIS_TAG="7-el9"
+STORAGE_CLASS="azurefile-csi"
 
 echo "--- 1. Preparing Namespace ---"
 echo " Using Namespace: ${NAMESPACE}"
@@ -109,7 +110,8 @@ spec:
     backend: { redis: true }
   system:
     fileStorage:
-      persistentVolumeClaim: {}
+      persistentVolumeClaim:
+        storageClassName: $STORAGE_CLASS
 EOF
 
 echo "--- 7. Waiting for Database Migrations (system-app-pre job) ---"
@@ -131,6 +133,8 @@ while true; do
     sleep 10
 done
 
+### EVERYTHING BELOW HERE MIGHT BE BROKEN ###
+
 echo "--- 8. Waiting for Application Pod Rollout ---"
 APP_LABEL="rht.comp=3scale,rht.subcomp_t=application"
 until [ "$(oc get pods -n "$NAMESPACE" -l "$APP_LABEL" --no-headers 2>/dev/null | wc -l)" -gt 0 ]; do
@@ -139,7 +143,7 @@ until [ "$(oc get pods -n "$NAMESPACE" -l "$APP_LABEL" --no-headers 2>/dev/null 
 done
 
 while true; do
-    NOT_READY=$(oc get pods -n "$NAMESPACE" -l "$APP_LABEL" --no-headers 2>/dev/null | grep -v "1/1" | wc -l || echo "0")
+    NOT_READY=$(oc get pods -n "$NAMESPACE" -l "$APP_LABEL" --no-headers | grep "Running" | grep -vE "1/1|2/2|3/3|4/4" | wc -l)
     if [ "$NOT_READY" -eq 0 ]; then
         echo "All application pods are Ready!"
         break
@@ -147,6 +151,8 @@ while true; do
     echo "Waiting for $NOT_READY pods to initialize..."
     sleep 10
 done
+
+### THIS ALSO MIGHT BE BROKEN ###
 
 echo "--- 9. Credentials ---"
 # Using label-based lookup for the master route
