@@ -150,7 +150,6 @@ spec:
           - ReadWriteOnce 
 EOF
 
-echo "--- Script Complete ---"
 echo "Project: $NAMESPACE"
 echo "Domain: $WILDCARD_DOMAIN"
 echo "Monitor: oc get pods -w"
