@@ -152,7 +152,6 @@ EOF
 
 echo "Project: $NAMESPACE"
 echo "Domain: $WILDCARD_DOMAIN"
-echo "Monitor: oc get pods -w"
 
 # Final sanity check to ensure the APIManager was accepted
 sleep 5
@@ -200,3 +199,4 @@ ADMIN_PASS=$(oc extract secret/system-seed -n "$NAMESPACE" --to=- --keys=ADMIN_P
 echo "Admin Portal URL: https://$ADMIN_URL"
 echo "Username: admin"
 echo "Password: $ADMIN_PASS"
+
