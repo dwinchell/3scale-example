@@ -55,19 +55,25 @@ spec:
   sourceNamespace: openshift-marketplace
 EOF
 
-echo "--- 3. Waiting for Operator Pod (rht.subcomp: 3scale_operator) ---"
-
-# Loop until the pod exists and is Ready
-while true; do
-    READY_STATUS=$(oc get pods -n "$NAMESPACE" -l rht.subcomp=3scale_operator -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null)
-    if [ "$READY_STATUS" == "true" ]; then
-        break
-    fi
-    echo "Waiting for 3scale operator pod to be ready in $NAMESPACE..."
+echo "--- 3. Waiting for Operator Pod ---"
+# 1. Wait for the pod to actually exist in the API
+until [ "$(oc get pods -n "$NAMESPACE" -l rht.subcomp=3scale_operator --no-headers 2>/dev/null | wc -l)" -gt 0 ]; do
+    echo "Waiting for 3scale operator pod to be created..."
     sleep 5
 done
 
-echo "Operator is up! Provisioning database infrastructure..."
+# 2. Now wait for it to be Ready
+while true; do
+    # Use || echo "false" to ensure the variable assignment doesn't trigger set -e
+    READY_STATUS=$(oc get pods -n "$NAMESPACE" -l rht.subcomp=3scale_operator -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
+    
+    if [ "$READY_STATUS" == "true" ]; then
+        echo "Operator is Ready!"
+        break
+    fi
+    echo "Waiting for operator pod to reach Ready state..."
+    sleep 5
+done
 
 echo "--- 4. Deploying Persistent Databases (PostgreSQL & Redis) ---"
 
@@ -144,19 +150,28 @@ echo "Domain: $WILDCARD_DOMAIN"
 sleep 5
 oc get apimanager -o yaml -n ${NAMESPACE}
 
-# --- NEW: Wait for Database Migrations ---
 echo "--- 6.5 Waiting for Database Migrations (system-app-pre job) ---"
 while true; do
-    JOB_STATUS=$(oc get job system-app-pre -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
+    # Check if the Job object even exists first
+    if ! oc get job system-app-pre -n "$NAMESPACE" &>/dev/null; then
+        echo "Waiting for Job 'system-app-pre' to be created..."
+        sleep 5
+        continue
+    fi
+
+    # Query the status only after we know the job exists
+    JOB_STATUS=$(oc get job system-app-pre -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "False")
+    
     if [ "$JOB_STATUS" == "True" ]; then
         echo "Database migrations complete!"
         break
     fi
-    echo "Waiting for migrations to finish... (Pod status: $(oc get pods -l job-name=system-app-pre -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo 'Pod not found. Waiting ...'))"
+
+    # Get Pod phase for logging purposes
+    POD_PHASE=$(oc get pods -n "$NAMESPACE" -l job-name=system-app-pre -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Starting")
+    echo "Waiting for migrations to finish... (Job Status: InProgress, Pod Phase: $POD_PHASE)"
     sleep 10
 done
-
-echo "--- 7. Waiting for 3scale Application Pods to be Ready ---"
 
 # This label identifies the actual 3scale app components (Apicast, System, Backend, Zync)
 APP_LABEL="rht.comp=3scale,rht.subcomp_t=application"
@@ -179,11 +194,22 @@ done
 
 echo "--- 8. 3scale Installation Successful! ---"
 
-# Retrieve the Admin Credentials
+# Retrieve the Admin Portal URL
 ADMIN_URL=$(oc get route system-developer-console -n "$NAMESPACE" -o jsonpath='{.spec.host}')
-ADMIN_PASS=$(oc extract secret/system-seed -n "$NAMESPACE" --to=- --keys=ADMIN_PASSWORD 2>/dev/null)
 
+echo "Extracting Admin Password..."
+# Retry loop for the secret, as it can take a few seconds to populate after pods are 'Ready'
+for i in {1..10}; do
+    ADMIN_PASS=$(oc extract secret/system-seed -n "$NAMESPACE" --to=- --keys=ADMIN_PASSWORD 2>/dev/null || echo "")
+    if [ -n "$ADMIN_PASS" ]; then
+        break
+    fi
+    echo "Waiting for system-seed secret to populate..."
+    sleep 5
+done
+
+echo "--------------------------------------------------"
 echo "Admin Portal URL: https://$ADMIN_URL"
 echo "Username: admin"
 echo "Password: $ADMIN_PASS"
-
+echo "--------------------------------------------------"
