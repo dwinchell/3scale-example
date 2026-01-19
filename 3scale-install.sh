@@ -80,7 +80,7 @@ echo "Operator is up! Provisioning database infrastructure..."
 echo "--- 4. Deploying Persistent Databases (PostgreSQL & Redis) ---"
 
 # System Database
-oc create deployment system-db-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:latest
+oc create deployment system-db-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:7-el9
 oc set env deployment/system-db-manual POSTGRESQL_USER=$DB_USER POSTGRESQL_PASSWORD=$DB_PASS POSTGRESQL_DATABASE=system_db
 oc set volume deployment/system-db-manual --add --name=system-db-data --type=pvc --claim-size=5Gi --mount-path=/var/lib/pgsql/data
 oc expose deployment system-db-manual --port=5432
@@ -101,7 +101,7 @@ echo "--- 5. Creating Secrets for 3scale ---"
 
 oc create secret generic system-database --from-literal=URL=postgresql://$DB_USER:$DB_PASS@system-db-manual:5432/system_db
 oc create secret generic system-redis    --from-literal=URL=redis://:$REDIS_PASS@redis-manual:6379/0
-oc create secret generic zync-queues-database --from-literal=DATABASE_URL=postgresql://$DB_USER:$DB_PASS@zync-db-manual:5432/zync_db
+oc create secret generic zync --from-literal=DATABASE_URL=postgresql://$DB_USER:$DB_PASS@zync-db-manual:5432/zync_db
 
 oc create secret generic backend-redis \
   --from-literal=REDIS_STORAGE_URL=redis://:$REDIS_PASS@redis-manual:6379/1 \
