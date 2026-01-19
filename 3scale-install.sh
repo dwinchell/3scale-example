@@ -100,9 +100,9 @@ oc set volume deployment/redis-manual --add --name=redis-data --type=pvc --claim
 oc expose deployment redis-manual --port=6379
 
 echo "--- Waiting for Database Pods to be Ready ---"
-oc wait --for=condition=Ready pod -l app=redis-manual --timeout=120s
-oc wait --for=condition=Ready pod -l app=system-db-manual --timeout=120s
-oc wait --for=condition=Ready pod -l app=zync-db-manual --timeout=120s
+oc rollout status deployment/redis-manual --timeout=120s
+oc rollout status deployment/system-db-manual --timeout=120s
+oc rollout status deployment/zync-db-manual --timeout=120s
 
 echo "--- 5. Creating Secrets for 3scale ---"
 
