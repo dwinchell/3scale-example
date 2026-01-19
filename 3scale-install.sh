@@ -106,10 +106,20 @@ oc wait --for=condition=Ready pod -l app=zync-db-manual --timeout=120s
 
 echo "--- 5. Creating Secrets for 3scale ---"
 
-oc create secret generic system-database --from-literal=URL=postgresql://$DB_USER:$DB_PASS@system-db-manual:5432/system_db
-oc create secret generic system-redis    --from-literal=URL=redis://:$REDIS_PASS@redis-manual:6379/0
-oc create secret generic zync --from-literal=DATABASE_URL=postgresql://$DB_USER:$DB_PASS@zync-db-manual:5432/zync_db
+# 1. System Database
+oc create secret generic system-database \
+  --from-literal=URL=postgresql://$DB_USER:$DB_PASS@system-db-manual:5432/system_db
 
+# 2. Zync Database (Needed for Operator Preflights)
+oc create secret generic zync-queues-database \
+  --from-literal=DATABASE_URL=postgresql://$DB_USER:$DB_PASS@zync-db-manual:5432/zync_db
+
+# 3. Zync Token (Needed for system-app-pre and zync pods)
+oc create secret generic zync \
+  --from-literal=ZYNC_AUTHENTICATION_TOKEN=$(openssl rand -base64 32)
+
+# 4. Redis
+oc create secret generic system-redis --from-literal=URL=redis://:$REDIS_PASS@redis-manual:6379/0
 oc create secret generic backend-redis \
   --from-literal=REDIS_STORAGE_URL=redis://:$REDIS_PASS@redis-manual:6379/1 \
   --from-literal=REDIS_QUEUES_URL=redis://:$REDIS_PASS@redis-manual:6379/2
@@ -132,6 +142,12 @@ spec:
       redis: true
     backend:
       redis: true
+  system:
+    fileStorage:
+      persistentVolumeClaim:
+        # Use this only for single-node clusters that can't support and don't need ReadWriteMany. Comment it out otherwise.
+        accessModes:
+          - ReadWriteOnce 
 EOF
 
 echo "--- Script Complete ---"
@@ -142,3 +158,46 @@ echo "Monitor: oc get pods -w"
 # Final sanity check to ensure the APIManager was accepted
 sleep 5
 oc get apimanager -o yaml -n ${NAMESPACE}
+
+# --- NEW: Wait for Database Migrations ---
+echo "--- 6.5 Waiting for Database Migrations (system-app-pre job) ---"
+while true; do
+    JOB_STATUS=$(oc get job system-app-pre -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
+    if [ "$JOB_STATUS" == "True" ]; then
+        echo "Database migrations complete!"
+        break
+    fi
+    echo "Waiting for migrations to finish... (Pod status: $(oc get pods -l job-name=system-app-pre -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo 'Pod not found. Waiting ...'))"
+    sleep 10
+done
+
+echo "--- 7. Waiting for 3scale Application Pods to be Ready ---"
+
+# This label identifies the actual 3scale app components (Apicast, System, Backend, Zync)
+APP_LABEL="rht.comp=3scale,rht.subcomp_t=application"
+
+while true; do
+    # Get the number of pods that are NOT ready
+    NOT_READY=$(oc get pods -n "$NAMESPACE" -l "$APP_LABEL" --no-headers 2>/dev/null | grep -v "1/1" | wc -l)
+
+    # Get total count to ensure pods have actually been created by the operator
+    TOTAL_PODS=$(oc get pods -n "$NAMESPACE" -l "$APP_LABEL" --no-headers 2>/dev/null | wc -l)
+
+    if [ "$TOTAL_PODS" -gt 0 ] && [ "$NOT_READY" -eq 0 ]; then
+        echo "All 3scale application pods are Ready!"
+        break
+    fi
+
+    echo "Waiting for $NOT_READY pods to initialize (Total application pods: $TOTAL_PODS)..."
+    sleep 10
+done
+
+echo "--- 8. 3scale Installation Successful! ---"
+
+# Retrieve the Admin Credentials
+ADMIN_URL=$(oc get route system-developer-console -n "$NAMESPACE" -o jsonpath='{.spec.host}')
+ADMIN_PASS=$(oc extract secret/system-seed -n "$NAMESPACE" --to=- --keys=ADMIN_PASSWORD 2>/dev/null)
+
+echo "Admin Portal URL: https://$ADMIN_URL"
+echo "Username: admin"
+echo "Password: $ADMIN_PASS"
