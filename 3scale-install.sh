@@ -134,4 +134,4 @@ echo "Monitor: oc get pods -w"
 
 # Final sanity check to ensure the APIManager was accepted
 sleep 5
-oc get apimanager apimanager-sample
+oc get apimanager -o yaml -n ${NAMESPACE}
