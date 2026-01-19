@@ -1,24 +1,8 @@
 #!/bin/bash
+set -euo pipefail
+set -x
 
-# --- Help Text Function ---
-function usage() {
-    echo "Usage: $0 <namespace> <wildcard_domain>"
-    echo ""
-    echo "Arguments:"
-    echo "  namespace          The OpenShift project to create (must not exist)"
-    echo "  wildcard_domain    The base domain for 3scale routes (e.g., apps.cluster.example.com)"
-    echo ""
-    echo "Example:"
-    echo "  $0 my-3scale-test apps.cluster-1234.openshift.com"
-    exit 1
-}
-
-# --- Argument Validation ---
-if [ "$#" -ne 2 ]; then
-    usage
-fi
-
-NAMESPACE=$1
+NAMESPACE=$(prefix="3scale" && printf "%s-%s\n" "$prefix" $(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 5))
 WILDCARD_DOMAIN=$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')
 DB_USER="system_user"
 DB_PASS="system_password"
@@ -27,7 +11,13 @@ POSTGRES_TAG="latest"
 REDIS_TAG="7-el9"
 
 # --- Namespace Logic ---
-echo "--- 1. Preparing Namespace: $NAMESPACE ---"
+echo "--- 1. Preparing Namespace ---"
+
+echo
+echo " Using Namespace: ${NAMESPACE}"
+echo " Using Wildcard Domain: ${WILDCARD_DOMAIN}"
+echo
+
 if oc get project "$NAMESPACE" &>/dev/null; then
     echo "Error: Namespace '$NAMESPACE' already exists. Please choose a new name or delete the old one."
     exit 1
