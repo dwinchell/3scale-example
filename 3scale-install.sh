@@ -19,7 +19,7 @@ if [ "$#" -ne 2 ]; then
 fi
 
 NAMESPACE=$1
-WILDCARD_DOMAIN=$2
+WILDCARD_DOMAIN=$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')
 DB_USER="system_user"
 DB_PASS="system_password"
 REDIS_PASS="redispw"
@@ -144,10 +144,7 @@ spec:
       redis: true
   system:
     fileStorage:
-      persistentVolumeClaim:
-        # Use this only for single-node clusters that can't support and don't need ReadWriteMany. Comment it out otherwise.
-        accessModes:
-          - ReadWriteOnce 
+      persistentVolumeClaim: {}
 EOF
 
 echo "Project: $NAMESPACE"
