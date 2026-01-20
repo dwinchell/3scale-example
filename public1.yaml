@@ -1,0 +1,17 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: public1-manual
+  namespace: apicast-jfxe3
+spec:
+  host: public1.apps.edm3g8k3.eastus.aroapp.io
+  port:
+    targetPort: proxy
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
+  to:
+    kind: Service
+    name: apicast-apicast
+    weight: 100
+  wildcardPolicy: None
