@@ -245,6 +245,12 @@ spec:
     app: redis-manual
 EOF
 
+
+echo "--- Waiting for Database Rollouts ---"
+oc rollout status deployment/redis-manual --timeout=120s
+oc rollout status deployment/system-db-manual --timeout=120s
+oc rollout status deployment/zync-db-manual --timeout=120s
+
 echo "--- 5. Creating Secrets ---"
 oc create secret generic system-database --from-literal=URL=postgresql://$DB_USER:$DB_PASS@system-db-manual:5432/system_db
 oc create secret generic zync-queues-database --from-literal=DATABASE_URL=postgresql://$DB_USER:$DB_PASS@zync-db-manual:5432/zync_db
