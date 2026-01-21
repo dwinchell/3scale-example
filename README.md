@@ -18,7 +18,7 @@ The storage classes below are installed by default if you are using Azure Red Ha
 # Recommended: Specify namespace and storage classes
 # -d managed-csi (Block storage for DB performance)
 # -s azurefile-csi (Shared storage for RWX support)
-./install-3scale.sh -n 3scale-core -d managed-csi -s azurefile-csi
+./install-3scale.sh -n 3scale -d managed-csi -s azurefile-csi
 ```
 
 #### Retrieving Credentials

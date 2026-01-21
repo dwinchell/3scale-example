@@ -9,28 +9,29 @@ DB_PASS="system_password"
 REDIS_PASS="redispw"
 POSTGRES_TAG="latest"
 REDIS_TAG="7-el9"
-STORAGE_CLASS="azurefile-csi" # Default for ARO RWX support
+
+# Default Storage Classes for ARO
+DB_STORAGE_CLASS="managed-csi"    # Block storage for Databases (RWO)
+SC_STORAGE_CLASS="azurefile-csi"  # File storage for 3scale System (RWX)
 
 # --- Argument Parsing ---
-while getopts "n:s:" opt; do
+while getopts "n:d:s:" opt; do
   case $opt in
     n) NAMESPACE="$OPTARG" ;;
-    s) STORAGE_CLASS="$OPTARG" ;;
-    *) echo "Usage: $0 [-n <NAMESPACE>] [-s <STORAGE_CLASS>]"; exit 1 ;;
+    d) DB_STORAGE_CLASS="$OPTARG" ;; # -d for Database storage class
+    s) SC_STORAGE_CLASS="$OPTARG" ;; # -s for 3scale System storage class
+    *) echo "Usage: $0 [-n <NAMESPACE>] [-d <DB_STORAGE_CLASS>] [-s <SC_STORAGE_CLASS>]"; exit 1 ;;
   esac
 done
 
 echo "--- 1. Preparing Namespace ---"
 echo " Using Namespace: ${NAMESPACE}"
-echo " Using Storage Class: ${STORAGE_CLASS}"
-echo " Using Wildcard Domain: ${WILDCARD_DOMAIN}"
+echo " Database Storage: ${DB_STORAGE_CLASS}"
+echo " 3scale System Storage: ${SC_STORAGE_CLASS}"
 
-# Check for existing project
 if oc get project "$NAMESPACE" &>/dev/null; then
-    echo " Using existing namespace: ${NAMESPACE}"
     oc project "$NAMESPACE"
 else
-    echo " Creating namespace: ${NAMESPACE}"
     oc create namespace "$NAMESPACE"
     oc project "$NAMESPACE"
 fi
@@ -79,34 +80,170 @@ done
 
 echo "--- 4. Deploying Persistent Databases ---"
 
-# Deploy System DB (Postgres)
-oc create deployment system-db-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:${POSTGRES_TAG}
-oc set env deployment/system-db-manual POSTGRESQL_USER=$DB_USER POSTGRESQL_PASSWORD=$DB_PASS POSTGRESQL_DATABASE=system_db
-oc set volume deployment/system-db-manual --add --name=system-db-data --type=pvc \
-  --claim-size=5Gi --mount-path=/var/lib/pgsql/data \
-  --claim-class=$STORAGE_CLASS --claim-mode=rwo
-oc expose deployment system-db-manual --port=5432
+# Create PVCs using DB_STORAGE_CLASS
+oc apply -f - <<EOF
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: system-db-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: 5Gi } }
+  storageClassName: $DB_STORAGE_CLASS
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: zync-db-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: 1Gi } }
+  storageClassName: $DB_STORAGE_CLASS
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: redis-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: 1Gi } }
+  storageClassName: $DB_STORAGE_CLASS
+EOF
 
-# Deploy Zync DB (Postgres)
-oc create deployment zync-db-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:${POSTGRES_TAG}
-oc set env deployment/zync-db-manual POSTGRESQL_USER=$DB_USER POSTGRESQL_PASSWORD=$DB_PASS POSTGRESQL_DATABASE=zync_db
-oc set volume deployment/zync-db-manual --add --name=zync-db-data --type=pvc \
-  --claim-size=1Gi --mount-path=/var/lib/pgsql/data \
-  --claim-class=$STORAGE_CLASS --claim-mode=rwo
-oc expose deployment zync-db-manual --port=5432
-
-# Deploy Redis
-oc create deployment redis-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/redis:${REDIS_TAG}
-oc set env deployment/redis-manual REDIS_PASSWORD=$REDIS_PASS
-oc set volume deployment/redis-manual --add --name=redis-data --type=pvc \
-  --claim-size=1Gi --mount-path=/var/lib/redis/data \
-  --claim-class=$STORAGE_CLASS --claim-mode=rwo
-oc expose deployment redis-manual --port=6379
-
-echo "--- Waiting for Database Rollouts ---"
-oc rollout status deployment/redis-manual --timeout=120s
-oc rollout status deployment/system-db-manual --timeout=120s
-oc rollout status deployment/zync-db-manual --timeout=120s
+# Deploy All Databases
+cat <<EOF | oc apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: system-db-manual
+spec:
+  selector:
+    matchLabels:
+      app: system-db-manual
+  template:
+    metadata:
+      labels:
+        app: system-db-manual
+    spec:
+      containers:
+      - name: postgresql
+        image: image-registry.openshift-image-registry.svc:5000/openshift/postgresql:${POSTGRES_TAG}
+        env:
+        - name: POSTGRESQL_USER
+          value: "$DB_USER"
+        - name: POSTGRESQL_PASSWORD
+          value: "$DB_PASS"
+        - name: POSTGRESQL_DATABASE
+          value: "system_db"
+        - name: POSTGRESQL_SKIP_CHMOD_CHOWN
+          value: "true"
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: system-db-data
+          mountPath: /var/lib/pgsql/data
+      volumes:
+      - name: system-db-data
+        persistentVolumeClaim:
+          claimName: system-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: system-db-manual
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: system-db-manual
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zync-db-manual
+spec:
+  selector:
+    matchLabels:
+      app: zync-db-manual
+  template:
+    metadata:
+      labels:
+        app: zync-db-manual
+    spec:
+      containers:
+      - name: postgresql
+        image: image-registry.openshift-image-registry.svc:5000/openshift/postgresql:${POSTGRES_TAG}
+        env:
+        - name: POSTGRESQL_USER
+          value: "$DB_USER"
+        - name: POSTGRESQL_PASSWORD
+          value: "$DB_PASS"
+        - name: POSTGRESQL_DATABASE
+          value: "zync_db"
+        - name: POSTGRESQL_SKIP_CHMOD_CHOWN
+          value: "true"
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: zync-db-data
+          mountPath: /var/lib/pgsql/data
+      volumes:
+      - name: zync-db-data
+        persistentVolumeClaim:
+          claimName: zync-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zync-db-manual
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: zync-db-manual
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-manual
+spec:
+  selector:
+    matchLabels:
+      app: redis-manual
+  template:
+    metadata:
+      labels:
+        app: redis-manual
+    spec:
+      containers:
+      - name: redis
+        image: image-registry.openshift-image-registry.svc:5000/openshift/redis:${REDIS_TAG}
+        env:
+        - name: REDIS_PASSWORD
+          value: "$REDIS_PASS"
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-data
+          mountPath: /var/lib/redis/data
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-manual
+spec:
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: redis-manual
+EOF
 
 echo "--- 5. Creating Secrets ---"
 oc create secret generic system-database --from-literal=URL=postgresql://$DB_USER:$DB_PASS@system-db-manual:5432/system_db
@@ -118,7 +255,7 @@ oc create secret generic backend-redis \
   --from-literal=REDIS_QUEUES_URL=redis://:$REDIS_PASS@redis-manual:6379/2
 
 echo "--- 6. Deploying APIManager ---"
-# Passing the storage class to the APIManager for RWX shared storage
+# Using SC_STORAGE_CLASS specifically for the shared RWX storage
 cat <<EOF | oc apply -f -
 apiVersion: apps.3scale.net/v1alpha1
 kind: APIManager
@@ -135,7 +272,7 @@ spec:
   system:
     fileStorage:
       persistentVolumeClaim:
-        storageClassName: $STORAGE_CLASS
+        storageClassName: $SC_STORAGE_CLASS
 EOF
 
 echo "--- 7. Waiting for Database Migrations (system-app-pre job) ---"
@@ -175,4 +312,22 @@ while true; do
     echo "Waiting for $NOT_READY pods to initialize..."
     sleep 10
 done
+
+# --- 9. Access Credentials ---
+# Retrieves the password and Provider Key as requested
+ADMIN_PASS=$(oc extract secret/system-seed -n "$NAMESPACE" --to=- --keys=ADMIN_PASSWORD 2>/dev/null || echo "Pending...")
+MASTER_URL=$(oc get routes -n "$NAMESPACE" -l "zync.3scale.net/route-type=master-portal" -o jsonpath='{.items[0].spec.host}' 2>/dev/null || echo "Pending...")
+
+echo "Retrieving Provider Key (this may take a moment)..."
+PROVIDER_KEY=$(oc run fetch-key-$(date +%s) --image=registry.redhat.io/rhel8/support-tools --rm -it --restart=Never --quiet -- \
+  curl -s -k -u "master:$ADMIN_PASS" "http://system-master.$NAMESPACE.svc.cluster.local:3000/admin/api/account/provider_key.xml" | \
+  grep -oPm1 "(?<=<provider_key>)[^<]+" || echo "Could not retrieve key automatically")
+
+echo "--------------------------------------------------"
+echo "Admin Portal URL: https://$MASTER_URL"
+echo "Username:         master"
+echo "Password:         $ADMIN_PASS"
+echo ""
+echo "Provider API Key: $PROVIDER_KEY"
+echo "--------------------------------------------------"
 
