@@ -82,6 +82,7 @@ spec:
   adminPortalCredentialsRef:
     name: $ADMIN_PORTAL_SECRET
   logLevel: debug
+  pathRoutingEnabled: true
 EOF
 
 

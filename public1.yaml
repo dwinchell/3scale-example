@@ -4,7 +4,8 @@ metadata:
   name: public1-manual
   namespace: apicast-jfxe3
 spec:
-  host: public1.apps.edm3g8k3.eastus.aroapp.io
+  host: api.apps.edm3g8k3.eastus.aroapp.io
+  path: /public1
   port:
     targetPort: proxy
   tls:
