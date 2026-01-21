@@ -1,38 +1,54 @@
-# 3Scale Example
+# 3Scale ARO Deployment Example
+This project provides automated scripts to deploy Red Hat 3Scale and Self-Managed APIcast instances on Azure Red Hat OpenShift (ARO). It is optimized for ARO storage requirements, specifically handling the differences between block storage for databases and shared file storage for 3Scale assets.
 
-Example of how to deploy 3Scale with Self-Managed APICast instances on OpenShift.
+## Prerequisites
 
-## Usage
+1. An authenticated oc CLI session to an Azure Red Hat OpenShift cluster.
+2. Cluster-admin or sufficient project-admin permissions.
 
-### Installing 3Scale
+## 1. Installing 3Scale
+The install-3scale.sh script deploys the 3Scale operator, sets up manual PostgreSQL and Redis instances using optimized storage, and initiates the APIManager.
+
+The storage classes below are installed by default if you are using Azure Red Hat OpenShift (ARO).
 
 ```
+# Basic installation (uses random namespace)
 ./install-3scale.sh
+
+# Recommended: Specify namespace and storage classes
+# -d managed-csi (Block storage for DB performance)
+# -s azurefile-csi (Shared storage for RWX support)
+./install-3scale.sh -n 3scale-core -d managed-csi -s azurefile-csi
 ```
 
-### Getting the Provider Key
+#### Retrieving Credentials
+Upon completion, the script will automatically output your credentials and the Provider API Key. You will need this key for the APIcast installation.
 
-1. Get the URL for the admin console by looking at the route. It should look similar to https://3scale-admin.apps.example.org/.
-2. Get the credentials from the secret.
-3. Login to the admin console.
-3. From the top navigation dropdown, select Accont Settings
-5. Copy the Provider API Key. Do not include any trailing spaces.
+## 2. Installing Self-Managed APIcast
+Once 3Scale is ready, deploy your APIcast gateways. These gateways are configured for Path-Based Routing, allowing multiple services to share a single domain.
 
-
-### Installing APICast
-
-**Note:** The Public Base URLs for production and staging must be different.
+### Usage
 
 ```
-./install-apicast.sh -k <PROVIDER_KEY> -u <STAGING_PUBLIC_BASE_URL> -n apicast-staging -e staging
-./install-apicast.sh -k <PROVIDER_KEY> -u <PRODUCTION_PUBLIC_BASE_URL> -n apicast-production -e production
+./install-apicast.sh -k <PROVIDER_KEY> -n <NAMESPACE> [-e <production|staging>]
 ```
 
-## Example
+### Example
 
 ```
-./install-3scale.sh
-./install-apicast.sh -k 1234b893297dd754b9f485d49bcbabcd -u api-staging.apps.1234abcd.eastus.aroapp.io -n apicast-staging -e staging
-./install-apicast.sh -k 1234b893297dd754b9f485d49bcbabcd -u api.apps.1234abcd.eastus.aroapp.io -n apicast-production -e production
+# Deploy Staging Gateway
+./install-apicast.sh -k 14ac5eb4... -n apicast-staging -e staging
+
+# Deploy Production Gateway
+./install-apicast.sh -k 14ac5eb4... -n apicast-production -e production
 ```
 
+## 3. Configuring Path-Based Routing
+Because pathRoutingEnabled is set to true in these gateways, you must configure your 3Scale services accordingly:
+
+Public Base URL: In the 3Scale Admin Portal, set the Public Base URL to your common domain (e.g., https://api.apps.cluster.com for production and https://api.apps.cluster.com for staging).
+
+Promote: Always click Promote to Production after making changes so the self-managed gateways can pull the new production.json configuration.
+
+## Troubleshooting Storage
+If your database pods are in CrashLoopBackOff, ensure you are using a block storage class (managed-csi) for the -d flag. Azure File (azurefile-csi) does not support the POSIX permissions required by PostgreSQL.
