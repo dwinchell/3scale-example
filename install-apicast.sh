@@ -8,18 +8,24 @@ DEPLOYMENT_ENVIRONMENT="production"
 ADMIN_PORTAL_PROVIDER_KEY=""
 
 # --- Argument Parsing ---
-while getopts "k:n:e:" opt; do
+while getopts "k:u:n:e:" opt; do
   case $opt in
     k) ADMIN_PORTAL_PROVIDER_KEY="$OPTARG" ;;
+    u) PUBLIC_BASE_URL="$OPTARG" ;;
     n) NAMESPACE="$OPTARG" ;;
     e) DEPLOYMENT_ENVIRONMENT="$OPTARG" ;;
-    *) echo "Usage: $0 -k <PROVIDER_KEY> [-n <NAMESPACE>] [-e <production|staging>]"; exit 1 ;;
+    *) echo "Usage: $0 -k <PROVIDER_KEY> -u <PUBLIC_BASE_URL> [-n <NAMESPACE>] [-e <production|staging>]"; exit 1 ;;
   esac
 done
 
 # --- Validation ---
 if [ -z "$ADMIN_PORTAL_PROVIDER_KEY" ]; then
     echo "Error: -k <ADMIN_PORTAL_PROVIDER_KEY> is required."
+    exit 1
+fi
+
+if [ -z "$PUBLIC_BASE_URL" ]; then
+    echo "Error: -k <PUBLIC_BASE_URL> is required."
     exit 1
 fi
 
@@ -106,6 +112,9 @@ spec:
   logLevel: debug
   pathRoutingEnabled: true
 EOF
+
+echo "--- 5. Creating Public Base URL Route ---"
+oc create route edge public-base-url --service=apicast-apicast --port=proxy --insecure-policy='Redirect' --hostname=${PUBLIC_BASE_URL}
 
 echo "--------------------------------------------------"
 echo "Deployment started in namespace: $NAMESPACE"
