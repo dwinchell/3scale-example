@@ -133,8 +133,6 @@ while true; do
     sleep 10
 done
 
-### EVERYTHING BELOW HERE MIGHT BE BROKEN ###
-
 echo "--- 8. Waiting for Application Pod Rollout ---"
 APP_LABEL="rht.comp=3scale,rht.subcomp_t=application"
 until [ "$(oc get pods -n "$NAMESPACE" -l "$APP_LABEL" --no-headers 2>/dev/null | wc -l)" -gt 0 ]; do
@@ -151,24 +149,4 @@ while true; do
     echo "Waiting for $NOT_READY pods to initialize..."
     sleep 10
 done
-
-### THIS ALSO MIGHT BE BROKEN ###
-
-echo "--- 9. Credentials ---"
-# Using label-based lookup for the master route
-MASTER_URL=$(oc get routes -n "$NAMESPACE" -l "zync.3scale.net/route-type=master-portal" -o jsonpath='{.items[0].spec.host}' 2>/dev/null || echo "Pending...")
-
-ADMIN_PASS=""
-for i in {1..12}; do
-    ADMIN_PASS=$(oc extract secret/system-seed -n "$NAMESPACE" --to=- --keys=ADMIN_PASSWORD 2>/dev/null || echo "")
-    if [ -n "$ADMIN_PASS" ]; then break; fi
-    echo "Waiting for system-seed secret..."
-    sleep 5
-done
-
-echo "--------------------------------------------------"
-echo "Master Admin Portal: https://$MASTER_URL"
-echo "Username: master"
-echo "Password: $ADMIN_PASS"
-echo "--------------------------------------------------"
 
