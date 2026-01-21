@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
-# set -x # Uncomment for deep debugging
 
+# --- Defaults ---
 NAMESPACE=$(prefix="3scale" && printf "%s-%s\n" "$prefix" $(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 5))
 WILDCARD_DOMAIN=$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')
 DB_USER="system_user"
@@ -11,17 +11,27 @@ POSTGRES_TAG="latest"
 REDIS_TAG="7-el9"
 STORAGE_CLASS="azurefile-csi"
 
+# --- Argument Parsing ---
+while getopts "n:" opt; do
+  case $opt in
+    n) NAMESPACE="$OPTARG" ;;
+    *) echo "Usage: $0 [-n <NAMESPACE>]"; exit 1 ;;
+  esac
+done
+
 echo "--- 1. Preparing Namespace ---"
 echo " Using Namespace: ${NAMESPACE}"
 echo " Using Wildcard Domain: ${WILDCARD_DOMAIN}"
 
+# Check for existing project
 if oc get project "$NAMESPACE" &>/dev/null; then
-    echo "Error: Namespace '$NAMESPACE' already exists."
-    exit 1
+    echo " Using existing namespace: ${NAMESPACE}"
+    oc project "$NAMESPACE"
+else
+    echo " Creating namespace: ${NAMESPACE}"
+    oc create namespace "$NAMESPACE"
+    oc project "$NAMESPACE"
 fi
-
-oc create namespace "$NAMESPACE"
-oc project "$NAMESPACE"
 
 echo "--- 2. Installing 3scale Operator ---"
 cat <<EOF | oc apply -f -
@@ -50,6 +60,7 @@ spec:
 EOF
 
 echo "--- 3. Waiting for Operator Pod ---"
+# Loop uses rht.subcomp label to find the operator pod
 until [ "$(oc get pods -n "$NAMESPACE" -l rht.subcomp=3scale_operator --no-headers 2>/dev/null | wc -l)" -gt 0 ]; do
     echo "Waiting for operator pod to be created..."
     sleep 5
@@ -115,6 +126,7 @@ spec:
 EOF
 
 echo "--- 7. Waiting for Database Migrations (system-app-pre job) ---"
+# Waits for migration job to complete before checking pods
 while true; do
     if ! oc get job system-app-pre -n "$NAMESPACE" &>/dev/null; then
         echo "Waiting for Job 'system-app-pre' to be created..."
@@ -141,6 +153,7 @@ until [ "$(oc get pods -n "$NAMESPACE" -l "$APP_LABEL" --no-headers 2>/dev/null 
 done
 
 while true; do
+    # Filters by "Running" status and verifies ready replicas
     NOT_READY=$(oc get pods -n "$NAMESPACE" -l "$APP_LABEL" --no-headers | grep "Running" | grep -vE "1/1|2/2|3/3|4/4" | wc -l)
     if [ "$NOT_READY" -eq 0 ]; then
         echo "All application pods are Ready!"
