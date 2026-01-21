@@ -1,8 +1,20 @@
 #!/bin/bash
 set -euo pipefail
-# set -x # Uncomment for deep debugging
 
-ADMIN_PORTAL_PROVIDER_KEY="14ac5eb43f6354aa742b72e6537c5df5"
+# --- Argument Parsing ---
+ADMIN_PORTAL_PROVIDER_KEY=""
+
+while getopts "k:" opt; do
+  case $opt in
+    k) ADMIN_PORTAL_PROVIDER_KEY="$OPTARG" ;;
+    *) echo "Usage: $0 -k <ADMIN_PORTAL_PROVIDER_KEY>"; exit 1 ;;
+  esac
+done
+
+if [ -z "$ADMIN_PORTAL_PROVIDER_KEY" ]; then
+    echo "Error: -k <ADMIN_PORTAL_PROVIDER_KEY> is required."
+    exit 1
+fi
 
 NAMESPACE=$(prefix="apicast" && printf "%s-%s\n" "$prefix" $(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 5))
 APPS_DOMAIN=$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')
@@ -11,7 +23,6 @@ ADMIN_PORTAL_DOMAIN="3scale-admin.${APPS_DOMAIN}"
 ADMIN_PORTAL_URL="https://${ADMIN_PORTAL_PROVIDER_KEY}@${ADMIN_PORTAL_DOMAIN}/"
 
 echo "--- 1. Preparing Namespace ---"
-echo " Using Namespace: ${NAMESPACE}"
 
 if oc get project "$NAMESPACE" &>/dev/null; then
     echo "Error: Namespace '$NAMESPACE' already exists."
@@ -20,6 +31,8 @@ fi
 
 oc create namespace "$NAMESPACE"
 oc project "$NAMESPACE"
+
+echo " Using Namespace: ${NAMESPACE}"
 
 echo "--- 2. Installing APICast Operator ---"
 
@@ -84,5 +97,4 @@ spec:
   logLevel: debug
   pathRoutingEnabled: true
 EOF
-
 
