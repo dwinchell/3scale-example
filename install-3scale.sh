@@ -9,18 +9,20 @@ DB_PASS="system_password"
 REDIS_PASS="redispw"
 POSTGRES_TAG="latest"
 REDIS_TAG="7-el9"
-STORAGE_CLASS="azurefile-csi"
+STORAGE_CLASS="azurefile-csi" # Default for ARO RWX support
 
 # --- Argument Parsing ---
-while getopts "n:" opt; do
+while getopts "n:s:" opt; do
   case $opt in
     n) NAMESPACE="$OPTARG" ;;
-    *) echo "Usage: $0 [-n <NAMESPACE>]"; exit 1 ;;
+    s) STORAGE_CLASS="$OPTARG" ;;
+    *) echo "Usage: $0 [-n <NAMESPACE>] [-s <STORAGE_CLASS>]"; exit 1 ;;
   esac
 done
 
 echo "--- 1. Preparing Namespace ---"
 echo " Using Namespace: ${NAMESPACE}"
+echo " Using Storage Class: ${STORAGE_CLASS}"
 echo " Using Wildcard Domain: ${WILDCARD_DOMAIN}"
 
 # Check for existing project
@@ -76,19 +78,29 @@ while true; do
 done
 
 echo "--- 4. Deploying Persistent Databases ---"
+
+# Deploy System DB (Postgres)
 oc create deployment system-db-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:${POSTGRES_TAG}
 oc set env deployment/system-db-manual POSTGRESQL_USER=$DB_USER POSTGRESQL_PASSWORD=$DB_PASS POSTGRESQL_DATABASE=system_db
-oc set volume deployment/system-db-manual --add --name=system-db-data --type=pvc --claim-size=5Gi --mount-path=/var/lib/pgsql/data
+oc set volume deployment/system-db-manual --add --name=system-db-data --type=pvc \
+  --claim-size=5Gi --mount-path=/var/lib/pgsql/data \
+  --claim-class=$STORAGE_CLASS --claim-mode=rwo
 oc expose deployment system-db-manual --port=5432
 
+# Deploy Zync DB (Postgres)
 oc create deployment zync-db-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:${POSTGRES_TAG}
 oc set env deployment/zync-db-manual POSTGRESQL_USER=$DB_USER POSTGRESQL_PASSWORD=$DB_PASS POSTGRESQL_DATABASE=zync_db
-oc set volume deployment/zync-db-manual --add --name=zync-db-data --type=pvc --claim-size=1Gi --mount-path=/var/lib/pgsql/data
+oc set volume deployment/zync-db-manual --add --name=zync-db-data --type=pvc \
+  --claim-size=1Gi --mount-path=/var/lib/pgsql/data \
+  --claim-class=$STORAGE_CLASS --claim-mode=rwo
 oc expose deployment zync-db-manual --port=5432
 
+# Deploy Redis
 oc create deployment redis-manual --image=image-registry.openshift-image-registry.svc:5000/openshift/redis:${REDIS_TAG}
 oc set env deployment/redis-manual REDIS_PASSWORD=$REDIS_PASS
-oc set volume deployment/redis-manual --add --name=redis-data --type=pvc --claim-size=1Gi --mount-path=/var/lib/redis/data
+oc set volume deployment/redis-manual --add --name=redis-data --type=pvc \
+  --claim-size=1Gi --mount-path=/var/lib/redis/data \
+  --claim-class=$STORAGE_CLASS --claim-mode=rwo
 oc expose deployment redis-manual --port=6379
 
 echo "--- Waiting for Database Rollouts ---"
@@ -106,6 +118,7 @@ oc create secret generic backend-redis \
   --from-literal=REDIS_QUEUES_URL=redis://:$REDIS_PASS@redis-manual:6379/2
 
 echo "--- 6. Deploying APIManager ---"
+# Passing the storage class to the APIManager for RWX shared storage
 cat <<EOF | oc apply -f -
 apiVersion: apps.3scale.net/v1alpha1
 kind: APIManager
