@@ -14,13 +14,13 @@ while getopts "k:u:n:e:" opt; do
     u) PUBLIC_BASE_URL="$OPTARG" ;;
     n) NAMESPACE="$OPTARG" ;;
     e) DEPLOYMENT_ENVIRONMENT="$OPTARG" ;;
-    *) echo "Usage: $0 -k <PROVIDER_KEY> -u <PUBLIC_BASE_URL> [-n <NAMESPACE>] [-e <production|staging>]"; exit 1 ;;
+    *) echo "Usage: $0 -k <ADMIN_PORTAL_PROVIDER_KEY> -u <PUBLIC_BASE_URL> [-n <NAMESPACE>] [-e <production|staging>]"; exit 1 ;;
   esac
 done
 
 # --- Validation ---
 if [ -z "$ADMIN_PORTAL_PROVIDER_KEY" ]; then
-    echo "Error: -k <ADMIN_PORTAL_PROVIDER_KEY> is required."
+    echo "Error: -u <ADMIN_PORTAL_PROVIDER_KEY> is required."
     exit 1
 fi
 
